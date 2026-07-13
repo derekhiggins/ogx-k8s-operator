@@ -1,6 +1,8 @@
 name: Run E2E Tests
 
 on:
+  push:
+    branches: [ ntsh ]
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [ main ]
@@ -141,6 +143,13 @@ jobs:
           kubectl describe nodes | grep -A5 "MemoryPressure\|memory\|OOMKill" >> operator-debug.log 2>&1
           echo "=== Operator Events ===" >> operator-debug.log
           kubectl -n ogx-k8s-operator-system get events --sort-by='.lastTimestamp' >> operator-debug.log 2>&1
+          kubectl get pods --all-namespaces -l app.kubernetes.io/managed-by=ogx-operator -o json | \
+            jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name)"' | \
+            while read pod; do
+              ns="${pod%%/*}"; name="${pod##*/}"
+              echo "=== OGXServer pod: $ns/$name ===" >> ogxserver-pods.log
+              kubectl -n "$ns" logs "$name" --tail=100 >> ogxserver-pods.log 2>&1 || true
+            done
 
       - name: Upload all logs to artifacts
         if: ${{ always() }}
