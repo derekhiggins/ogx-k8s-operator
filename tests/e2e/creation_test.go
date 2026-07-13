@@ -112,7 +112,7 @@ func testCreateServerForType(t *testing.T, distType string) *ogxiov1beta1.OGXSer
 	require.NoError(t, err)
 
 	err = WaitForPodsReady(t, TestEnv, ns.Name, ogxServer.Name, ResourceReadyTimeout)
-	require.NoError(t, err, "Pods should be running and ready")
+	requireNoErrorWithDebugging(t, TestEnv, err, "Pods should be running and ready", ns.Name, ogxServer.Name)
 
 	err = EnsureResourceReady(t, TestEnv, schema.GroupVersionKind{
 		Group:   "",
@@ -208,7 +208,7 @@ func testCRDeploymentUpdate(t *testing.T, server *ogxiov1beta1.OGXServer) {
 	require.NoError(t, updateCRReplicas(server, 1), "Failed to scale CR back to 1")
 
 	err = WaitForPodsReady(t, TestEnv, server.Namespace, server.Name, ResourceReadyTimeout)
-	require.NoError(t, err, "Pod should be ready after scale-up")
+	requireNoErrorWithDebugging(t, TestEnv, err, "Pod should be ready after scale-up", server.Namespace, server.Name)
 }
 
 func testHealthStatus(t *testing.T, server *ogxiov1beta1.OGXServer) {

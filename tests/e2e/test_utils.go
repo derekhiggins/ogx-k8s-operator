@@ -4,6 +4,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,11 +19,13 @@ import (
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -43,8 +46,9 @@ var (
 
 // TestEnvironment holds the test environment configuration.
 type TestEnvironment struct {
-	Client client.Client
-	Ctx    context.Context //nolint:containedctx // Context is used for test environment
+	Client    client.Client
+	Clientset *kubernetes.Clientset
+	Ctx       context.Context //nolint:containedctx // Context is used for test environment
 }
 
 // SetupTestEnv sets up the test environment.
@@ -59,9 +63,15 @@ func SetupTestEnv() (*TestEnvironment, error) {
 		return nil, err
 	}
 
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	return &TestEnvironment{
-		Client: cl,
-		Ctx:    context.TODO(),
+		Client:    cl,
+		Clientset: cs,
+		Ctx:       context.TODO(),
 	}, nil
 }
 
@@ -421,9 +431,50 @@ func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
 				t.Logf("    Terminated: %s - %s",
 					cs.State.Terminated.Reason, cs.State.Terminated.Message)
 			}
-		}
 
-		t.Logf("  (Pod logs require direct kubectl access)")
+			fetchAndLogContainerLogs(t, testenv, namespace, pod.Name, cs.Name, false)
+			if cs.RestartCount > 0 {
+				fetchAndLogContainerLogs(t, testenv, namespace, pod.Name, cs.Name, true)
+			}
+		}
+	}
+}
+
+func fetchAndLogContainerLogs(t *testing.T, testenv *TestEnvironment, namespace, podName, containerName string, previous bool) {
+	t.Helper()
+	label := "logs"
+	if previous {
+		label = "previous logs"
+	}
+	req := testenv.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+		Container: containerName,
+		TailLines: func() *int64 { n := int64(50); return &n }(),
+		Previous:  previous,
+	})
+	rc, err := req.Stream(testenv.Ctx)
+	if err != nil {
+		t.Logf("  Container %s %s: unavailable (%v)", containerName, label, err)
+		return
+	}
+	defer rc.Close()
+	buf, err := io.ReadAll(rc)
+	if err != nil {
+		t.Logf("  Container %s %s: read error (%v)", containerName, label, err)
+		return
+	}
+	t.Logf("  Container %s %s:\n%s", containerName, label, string(buf))
+}
+
+// dumpNamespaceEvents logs all events in a namespace using the typed clientset.
+func dumpNamespaceEvents(t *testing.T, testenv *TestEnvironment, namespace string) {
+	t.Helper()
+	events, err := testenv.Clientset.CoreV1().Events(namespace).List(testenv.Ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Logf("Failed to list events in %s: %v", namespace, err)
+		return
+	}
+	for _, e := range events.Items {
+		t.Logf("Event [%s] %s/%s: %s", e.Type, e.InvolvedObject.Kind, e.InvolvedObject.Name, e.Message)
 	}
 }
 

@@ -114,7 +114,7 @@ func testOGXServerWithCABundle(t *testing.T) {
 	require.NoError(t, err, "OGXServer deployment should be created by operator")
 
 	err = WaitForPodsReady(t, TestEnv, ogxTestNS, "ogxserver-with-ca-bundle", 5*time.Minute)
-	require.NoError(t, err, "OGXServer pods should be running and ready")
+	requireNoErrorWithDebugging(t, TestEnv, err, "OGXServer pods should be running and ready", ogxTestNS, "ogxserver-with-ca-bundle")
 
 	err = verifyCertificateMounts(t, ogxTestNS, "ogxserver-with-ca-bundle")
 	require.NoError(t, err, "Certificate volumes should be mounted correctly")
